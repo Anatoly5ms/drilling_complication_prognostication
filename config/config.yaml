@@ -1,0 +1,187 @@
+data:
+  raw_ddr_path: 'static/raw/volve_ddr.parquet'
+  interim_output_path: 'static/interim'
+  save_interim: true
+  key_columns: ['nameWell', 'nameWellbore']
+  nested_tables:
+    wellboreInfo: 'wellbore_info'
+    statusInfo: 'status'
+    activity: 'activity'
+    fluid: 'fluid'
+    lithShowInfo: 'lithology'
+    porePressure: 'pore_pressure'
+    surveyStation: 'survey'
+  numeric_parse_threshold: 0.9 # в WITSML всё хранится строками: колонка переводится в число; значение – это допустимая доля НЕпустых значений
+  force_string_columns: ['docName', 'name', 'reportNo', 'proprietaryCode', 'state',
+                         'stateDetailActivity', 'phase', 'comments', 'lithology', 'show',
+                         'mudClass', 'type', 'locationSample', 'readingKind', 'presTestType',
+                         'sum24Hr', 'forecast24Hr', 'operator', 'versionKind']
+  null_values: [-999.99, -999.25, -9999.0]
+  datetime_prefixes: ['dTim']
+  datetime_columns: ['createDate', 'dateDrillComplete']
+  deduplicate_reports: true
+
+target:
+  complication_type: 'lost_circulation' # 'well_control', 'stuck_pipe', 'wellbore_instability'
+  min_positive_events:
+    lost_circulation: 15
+    well_control: 15
+    stuck_pipe: 15
+    wellbore_instability: 15
+ 
+labeler:
+  output_path: 'static/interim/labels'
+  save_labels: true
+  interval_length: 10 # единица анализа: интервал глубины по стволу, м
+  label_tolerance_above: 1 # допуск по глубине: метка ставится ещё на N соседних интервалов выше и ниже интервала события (неточность глубины в рапортах)
+  label_tolerance_below: 0 # ниже – 0: поглощение происходит в уже пробуренном стволе, а интервал ниже забоя бурили уже после начала события
+  event_gap_hours: 12 # операции одного типа в одном стволе объединяются в одно событие, если между ними меньше N часов
+  event_max_depth_gap: 100 # операции одного типа в одном стволе объединяются в одно событие, если глубина между ними меняется не больше чем на N метров
+  relevant_phases: ['drilling', 'interruption'] # этапы, операции которых участвуют в разметке. Здесь НЕ учитывается заканчивание, КРС и ликвидация – это не бурение
+  min_valid_md: 100
+  drilling_codes: ['drilling -- drill'] # операции, по которым строится сетка пробуренных интервалов (база примеров для отрицательного класса, который в моём случае является ОТСУТСТВИЕМ осложнения выбранного типа)
+  event_depth_source: 'hole_depth' # глубина события (hole_depth) – это забой ствола на момент события, а bit_depth – глубина долота в операции
+  weak_as_positive: true # пока нет LLM-проверки, события только со слабыми совпадениями тоже считаются положительными
+  complication_rules:
+  # правила разметки для всех типов осложнений одинаковы:
+  # - strong_patterns: однозначные формулировки, событие ставится сразу
+  # - weak_patterns: формулировки, которые часто, но не всегда означают осложнение (кандидаты для будущей LLM-проверки)
+  # - code_requires_text: код засчитывается только при подтверждении текстом (если коды в данных ненадёжны)
+  # - exclude_patterns: отрицания и посторонний контекст в том же предложении
+    lost_circulation:
+      codes: ['interruption -- lost circulation']
+      code_requires_text: false
+      strong_patterns: ['lost circulation', '\blost\s+\d+([.,]\d+)?\s*(m3|m³)', '\blos(ing|t)\s+(mud|fluid)',
+                        'loss(es)?\s+(of\s+|rate\s+(of\s+)?)?(approx\.?\s*)?\d+([.,]\d+)?\s*(m3|m³|l\s*/\s*h|liter)',
+                        'loss(es)?\s+to\s+(the\s+)?(formation|well)', 'downhole\s+losses', 'total\s+(mud\s+)?loss(es)?']
+      weak_patterns: ['lost\s+returns', 'no\s+returns', 'partial\s+returns', '\blosses\b', 'loss\s+rate',
+                      'static\s+loss', 'dynamic\s+loss', 'indication\s+of\s+losses']
+      exclude_patterns: ['\bno\s+(\w+\s+)?loss', 'without\s+(\w+\s+)?loss', 'nil\s+loss', 'losses:?\s*0\b',
+                         'pressure\s+loss', 'friction\s+loss',
+                         'check(ed|ing)?\s+for\s+loss', 'monitor(ed|ing)?\s+(the\s+)?(well\s+)?for\s+loss',
+                         'observed\s+(the\s+)?well\s+for\s+loss', 'loss[- ]free',
+                         '(over|at|on)\s+(the\s+)?shakers', 'surface\s+(system|equipment|lines)',
+                         'b-annulus', 'pressure\s+test', 'seals?\s+engag', 'connector', 'returns\s+up\s+(the\s+)?annulus']
+    well_control:
+      codes: ['interruption -- well control']
+      code_requires_text: true
+      strong_patterns: ['shut[- ]?in\s+(the\s+)?well', 'closed\s+in\s+(the\s+)?well', '\bS/I\s+well', '\bSICP\b', '\bSIDPP\b',
+                        '\binflux\b', 'well\s+(was\s+)?flowing', 'didn.?t\s+stop\s+flowing', 'flow\s*check(ed)?\s+positive',
+                        'circulated\s+out\s+(the\s+)?(kick|influx)']
+      weak_patterns: ['\bkick\b(?![- ]?(drill|off|assembly|valve))', 'pit\s+gain', 'gain(ed)?\s+\d+([.,]\d+)?\s*(m3|m³)',
+                      'gain\s+in\s+(the\s+)?trip\s+tank']
+      exclude_patterns: ['\bno\s+(\w+\s+)?(gain|flow|influx)', 'well\s+static', 'flow\s*check(ed)?:?\s*(ok|neg|negative|static)',
+                         'kick[- ]?drill', 'well\s+control\s+drill', 'pit\s+drill', 'kick[- ]?off', '\bKOP\b',
+                         'contingenc', 'kick\s+assembly', 'flowed\s+back', 'ballooning', 'breathing']
+    stuck_pipe:
+      codes: []
+      code_requires_text: false
+      strong_patterns: ['(pipe|string|bha|casing|liner|bit|stab(ilizer)?)\s+(was\s+|got\s+|went\s+|became\s+)?stuck',
+                        'stuck\s+(pipe|string)', 'differential(ly)?\s+stu(ck|cking)', 'differential(ly)?\s+stick',
+                        'work(ed|ing)?\s+(the\s+)?(stuck\s+)?(pipe|string)\s+free', 'jarred\s+(the\s+)?(pipe\s+|string\s+)?free',
+                        'fired\s+jars?']
+      weak_patterns: ['\bjarr(ed|ing)\b', 'packed[- ]?off', 'pack[- ]?off\s+tendenc', 'hole\s+pack',
+                      'unable\s+to\s+(rotate|move)', 'free\s+point', '\bstalled\b']
+      exclude_patterns: ['\bnot\s+stuck', 'potential\s+for\s+stuck', 'tool\s*box',
+                         'fingerboard|diverter|\btong|drift|DHSV|lock\s+pin|\bPRS\b|roller|tension\s+joint|protector|swedge',
+                         'wire\s*line|\bWL\b|slickline|toolstring', 'running\s+tool', '\bassy\b']
+    wellbore_instability:
+      codes: []
+      code_requires_text: false
+      strong_patterns: ['cavings', 'hole\s+collapse', 'unstable\s+hole', 'hole\s+instability', 'sloughing',
+                        '(unable|not\s+able)\s+to\s+pass']
+      weak_patterns: ['tight\s+(hole|spots?|area|section)', 'fill\s+on\s+bottom', '\d+([.,]\d+)?\s*m\s+(of\s+)?fill',
+                      'excessive\s+(amount\s+of\s+)?cuttings', 'took\s+weight']
+      exclude_patterns: ['\bno\s+(\w+\s+)?(cavings|tight|fill|obstruction)', 'without\s+(cavings|tight)', '\bROV\b']
+ 
+features:
+  output_path: 'static/processed'
+  save_features: true
+  well_key_pattern: '^(NO 15/9-(?:F-)?\d+)' # ключ скважины из названия ствола (суффикс бокового ствола отрезается), потому что боковые стволы одной скважины делят верхнюю часть разреза
+  test_size: 0.2
+  random_state: 42
+  valid_ranges: # значения вне диапазона считаются ошибкой данных и становятся пропусками (поровое давление ниже гидростатики допускается – это может быть истощение пласта)
+    tvd: [0, 6000]
+    incl: [0, 120]
+    incl_change: [0, 30]
+    hole_diameter: [3, 42]
+    open_hole_length: [0, 7000]
+    mud_density: [0.8, 2.5]
+    mud_pv: [1, 150]
+    mud_yp: [0, 100]
+    pore_pressure_emw: [0.5, 2.5]
+    fit_emw: [0.8, 3.0]
+  lithology_groups: # описание относится к группе, чей шаблон встречается в тексте раньше всех (\b отсекает прилагательные: "silty claystone" -> claystone, а не siltstone)
+    claystone: ['\bclay(stone)?\b', '\bshale\b', '\bmudstone\b', '\bclst\b']
+    sandstone: ['\bsand(stone)?\b', '\bsst\b']
+    siltstone: ['\bsilt(stone)?\b', '\bsltst\b']
+    limestone: ['\blime(stone)?\b', '\blst\b', '\bchalk\b']
+    dolomite: ['\bdolomite\b']
+    marl: ['\bmarl(stone)?\b']
+    coal: ['\bcoal\b', '\blignite\b']
+    tuff: ['\btuff\b', '\bvolcanic\b']
+    evaporite: ['\banhydrite\b', '\bgypsum\b', '\bhalite\b', '\bsalt\b']
+    conglomerate: ['\bconglomerate\b', '\bgravel\b']
+  shale_groups: ['claystone', 'marl'] # какие группы считаются глинистыми для shale_share
+  common: ['tvd', 'incl', 'hole_diameter', 'open_hole_length', 'mud_density', 'mud_pv', 'mud_yp', 'pore_pressure_emw', 'fit_emw', 'lithology_group'] # признаки, которые идут в модель (общие + специфичные для типа осложнения). Убираю 'md_top' для теста
+  by_type:
+    lost_circulation: ['fracture_margin', 'overbalance']
+    well_control: ['overbalance']
+    stuck_pipe: ['overbalance', 'incl_change']
+    wellbore_instability: ['shale_share', 'overbalance']
+
+evaluation: # кросс-валидация внутри train по скважинам (StratifiedGroupKFold). Фактическое число фолдов = min(n_splits, число скважин с осложнениями в train), чтобы в каждом фолде были положительные примеры
+  n_splits: 5
+  random_state: 42
+  primary_metric: 'pr_auc' # основная метрика для сравнения моделей, т.к. положительный класс (осложнения) встречаются редко, а PR-AUC устойчива к сильному дисбалансу классов
+  # порог классификации подбирается по out-of-fold предсказаниям train (максимум F1) и затем без изменений применяется к тесту
+  # доверительный интервал метрик на тесте бутстрэпом:
+  # 'group' – пересэмплирование скважин (честнее, но при 2–3 тестовых скважинах интервал очень грубый, но для первых потуг можно и закрыть глаза),
+  # 'row' – пересэмплирование интервалов (интервал уже, но оптимистичный: соседние интервалы зависимы)
+  bootstrap_unit: 'row'
+  bootstrap_iterations: 1000
+  confidence_level: 0.95
+
+baseline: # эвристика из магистерской диссертации. Риск = произведение P(группа признака | осложнение) по всем признакам. Числовые признаки делятся на квантильные группы по train (как группы пористости и проницаемости в диссертации)
+  n_bins: 4
+  smoothing: 1.0 # сглаживание Лапласа, чтобы группа без осложнений в train не обнуляла всё произведение
+
+logistic_regression:
+  C: 0.01 # сила регуляризации L2. Чем меньше C, тем сильнее модель "прижимает" коэффициенты (защита от переобучения на малых данных)
+  class_weight: null # null – без весов классов. Вероятности остаются откалиброванными (Brier имеет смысл); 'balanced' – редкий класс весит больше, ранжирование почти то же, но вероятности завышены
+  max_iter: 2000
+  add_missing_indicator: true # флаг "значение было пропущено" для каждого числового признака. Может нести смысл (нет FIT – секция только началась), но может и кодировать "эпоху и стиль отчётности" скважины, что не переносится на новые скважины
+
+
+random_forest:
+  n_estimators: 500
+  min_samples_leaf: 20 # минимум интервалов в листе. На малых данных с ~1% положительных это главная защита от переобучения
+  max_depth: null
+  max_features: 'sqrt'
+  class_weight: 'balanced_subsample' # 'balanced_subsample' – редкий класс весит больше в каждой бутстрэп-выборке. Это помогает лесу находить разбиения под поглощения, но вероятности завышены (Brier не интерпретируется). Null – без весов
+  random_state: 42
+
+lightgbm: # бустинг обычно сильнее леса, но легче переобучается, поэтому параметры подобраны консервативно под малые данные (позже оптуной подберу)
+  n_estimators: 300
+  learning_rate: 0.03
+  num_leaves: 15
+  min_child_samples: 20
+  subsample: 0.8
+  subsample_freq: 1
+  colsample_bytree: 0.8
+  reg_lambda: 1.0 # L2-регуляризация
+  class_weight: 'balanced' # как и у леса: веса классов помогают находить разбиения под редкие осложнения
+  random_state: 42
+
+catboost:
+  # у катбуста деревья симметричные (одно и то же условие на всём уровне дерева). Это, считай, сильная встроенная регуляризация, поэтому на малых данных катбуст часто переобучается меньше LightGBM
+  iterations: 500
+  learning_rate: 0.03
+  depth: 4
+  l2_leaf_reg: 3.0 # L2-регуляризация
+  auto_class_weights: 'Balanced' # аналог class_weight='balanced' у леса и LightGBM; null – без весов
+  random_seed: 42
+
+model_selection:
+  reference_model: 'baseline' # в отбор и в ансамбль попадают только модели, чей OOF PR-AUC выше этой модели (эвристика 2019 года)
+  min_ensemble_size: 2 # ансамбль собирается, только если порог прошли хотя бы столько моделей
