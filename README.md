@@ -1,5 +1,7 @@
 # Drilling Complication Prognostication
 
+[English](README.md) | [Русский](README.ru.md)
+
 Predicting the risk of drilling complications (lost circulation, kicks, stuck pipe, wellbore instability) for each depth interval of a well, using open daily drilling reports from the Equinor Volve field.
 
 > **Status:** preliminary study complete (v0.1). Data pipeline, labeling, feature engineering, evaluation, five models, the ensemble and a one-time held-out test are done. Next steps are listed in the roadmap.
@@ -40,7 +42,7 @@ Labels complications from the operations log, for all four complication types at
 | Stuck pipe | 44 | 95* | 1.3%* |
 | Wellbore instability | 110 | 218* | 3.0%* |
 
-\* before the asymmetric depth tolerance was introduced; will be updated. Well-control events in Volve are too few to train a model, and the pipeline refuses to train below a configurable threshold.
+\* computed before the asymmetric depth tolerance was introduced; models for these types are planned (see Roadmap). Well-control events in Volve are too few to train a model, and the pipeline refuses to train below a configurable threshold.
 
 ### 3. FeatureBuilder
 Builds features for each interval:
@@ -61,7 +63,7 @@ Physically impossible values are set to missing by configurable valid ranges; op
 - **Well-grouped validation:** sidetracks of one well share the upper hole section, so all splits are by well, not by wellbore.
 - **Held-out test:** 3 of 11 wells, chosen so that both the interval share and the positive share are close to 20%.
 - **Cross-validation:** `StratifiedGroupKFold` by well inside the training set; folds are constructed so that every validation fold contains positive examples.
-- **Metrics:** PR-AUC on pooled out-of-fold predictions is the primary metric (robust to the ~1% positive rate); ROC-AUC, Brier score (vs. a constant-prevalence predictor) and F1 at a threshold tuned on out-of-fold predictions are reported as well. Test-set metrics will include bootstrap confidence intervals.
+- **Metrics:** PR-AUC on pooled out-of-fold predictions is the primary metric (robust to the ~1% positive rate); ROC-AUC, Brier score (vs. a constant-prevalence predictor) and F1 at a threshold tuned on out-of-fold predictions are reported as well. Test-set metrics include bootstrap confidence intervals.
 
 ## Leakage control
 
