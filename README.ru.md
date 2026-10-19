@@ -170,3 +170,5 @@ main.py
 ## Автор
 
 Анатолий Григорович — инженер по бурению (магистратура, Санкт-Петербургский горный университет) и технический руководитель проектов в области AI/ML.
+
+[LinkedIn](https://www.linkedin.com/in/anatolii-grigorovich/) • [anatoly95grigorovich@gmail.com](mailto:anatoly95grigorovich@gmail.com)

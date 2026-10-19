@@ -170,3 +170,5 @@ main.py
 ## Author
 
 Anatolii Grigorovich — drilling engineer (MSc, Saint Petersburg Mining University) and technical project manager in AI/ML.
+
+[LinkedIn](https://www.linkedin.com/in/anatolii-grigorovich/) • [anatoly95grigorovich@gmail.com](mailto:anatoly95grigorovich@gmail.com)
